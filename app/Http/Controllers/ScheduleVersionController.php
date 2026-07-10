@@ -13,6 +13,7 @@ use App\Models\Jam;
 use App\Models\BebanMengajar;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 
 class ScheduleVersionController extends Controller
 {
@@ -34,59 +35,53 @@ class ScheduleVersionController extends Controller
 
     public function generate(ScheduleVersion $scheduleVersion)
     {
-        set_time_limit(300);
+        $pidFile = storage_path("app/generate_{$scheduleVersion->id}.pid");
 
-        $data = [
-            'gurus' => Guru::where('status', 'aktif')->get(['id', 'maks_jam'])->toArray(),
-            'mapels' => MataPelajaran::all(['id', 'nama', 'kode', 'durasi', 'jam_per_minggu', 'jenis'])->toArray(),
-            'kelas' => Kelas::all(['id'])->toArray(),
-            'ruangans' => Ruangan::all(['id'])->toArray(),
-            'hari' => Hari::orderBy('urutan')->get(['id'])->toArray(),
-            'jam' => Jam::orderBy('urutan')->get(['id', 'nama'])->toArray(),
-            'bebans' => BebanMengajar::get()->map(fn($b) => [
-                'guru_id' => $b->guru_id,
-                'mapel_id' => $b->mata_pelajaran_id,
-                'kelas_id' => $b->kelas_id,
-                'jumlah_jam' => $b->jumlah_jam,
-            ])->toArray(),
-        ];
-
-        try {
-            $response = Http::timeout(300)->post('http://127.0.0.1:5000/api/generate', $data);
-        } catch (\Exception $e) {
-            return redirect()->route('jadwal.versi')->with('error', 'Gagal terhubung ke Python scheduler. Pastikan python/app.py sudah dijalankan. Error: ' . $e->getMessage());
+        if (file_exists($pidFile)) {
+            return redirect()->route('jadwal.progress', $scheduleVersion->id)
+                ->with('info', 'Proses generate sedang berjalan...');
         }
 
-        if (!$response->successful()) {
-            return redirect()->route('jadwal.versi')->with('error', 'Python scheduler error: ' . $response->body());
+        Cache::put("generate_progress_{$scheduleVersion->id}", [
+            'percent' => 0,
+            'step' => 'mulai',
+            'message' => 'Memulai proses generate...',
+            'done' => false,
+            'error' => false,
+        ], 600);
+
+        $artisanPath = base_path('artisan');
+        $phpPath = PHP_BINARY;
+
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            $cmd = "start /B \"\" \"{$phpPath}\" \"{$artisanPath}\" jadwal:generate {$scheduleVersion->id} > NUL 2>&1";
+            exec($cmd);
+        } else {
+            $cmd = "nohup \"{$phpPath}\" \"{$artisanPath}\" jadwal:generate {$scheduleVersion->id} > /dev/null 2>&1 & echo $!";
+            $pid = exec($cmd);
+            file_put_contents($pidFile, $pid);
         }
 
-        $result = $response->json();
+        return redirect()->route('jadwal.progress', $scheduleVersion->id);
+    }
 
-        if ($result['status'] !== 'success') {
-            return redirect()->route('jadwal.versi')->with('error', $result['message'] ?? 'Gagal generate jadwal');
-        }
+    public function progress($versionId)
+    {
+        $version = ScheduleVersion::findOrFail($versionId);
+        return view('jadwal.progress', compact('version'));
+    }
 
-        Jadwal::where('schedule_version_id', $scheduleVersion->id)->delete();
+    public function progressData($versionId)
+    {
+        $progress = Cache::get("generate_progress_{$versionId}", [
+            'percent' => 0,
+            'step' => 'mulai',
+            'message' => 'Memulai...',
+            'done' => false,
+            'error' => false,
+        ]);
 
-        $chunks = array_chunk($result['jadwal'], 50);
-        foreach ($chunks as $chunk) {
-            $insertData = [];
-            foreach ($chunk as $item) {
-                $insertData[] = array_merge($item, [
-                    'schedule_version_id' => $scheduleVersion->id,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
-            Jadwal::insert($insertData);
-        }
-
-        $total = count($result['jadwal']);
-        $scheduleVersion->update(['status' => 'draft']);
-
-        return redirect()->route('jadwal.keseluruhan', ['version_id' => $scheduleVersion->id])
-            ->with('success', "Jadwal berhasil digenerate! Total: {$total} entri.");
+        return response()->json($progress);
     }
 
     public function finalize(ScheduleVersion $scheduleVersion)
@@ -97,6 +92,11 @@ class ScheduleVersionController extends Controller
 
     public function destroy(ScheduleVersion $scheduleVersion)
     {
+        $pidFile = storage_path("app/generate_{$scheduleVersion->id}.pid");
+        if (file_exists($pidFile)) {
+            unlink($pidFile);
+        }
+        Cache::forget("generate_progress_{$scheduleVersion->id}");
         $scheduleVersion->delete();
         return redirect()->route('jadwal.versi')->with('success', 'Versi jadwal dihapus');
     }

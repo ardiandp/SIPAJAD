@@ -49,7 +49,7 @@
                             <div class="d-flex gap-1 flex-wrap">
                                 @if($v->status == 'draft')
                                     <form action="{{ route('jadwal.versi.generate', $v) }}" method="POST" class="d-inline"
-                                          onsubmit="return confirm('Generate jadwal untuk versi \"{{ $v->nama }}\"? Proses ini akan menghapus jadwal sebelumnya.')">
+                                          onsubmit="return confirm('Generate jadwal untuk versi \"{{ $v->nama }}\"?')">
                                         @csrf
                                         <button type="submit" class="btn btn-sm btn-primary">
                                             <i class="ti ti-refresh"></i> Generate

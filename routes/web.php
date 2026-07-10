@@ -39,6 +39,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('versi', [ScheduleVersionController::class, 'index'])->name('versi');
         Route::post('versi', [ScheduleVersionController::class, 'store'])->name('versi.store');
         Route::post('versi/{scheduleVersion}/generate', [ScheduleVersionController::class, 'generate'])->name('versi.generate');
+        Route::get('versi/{versionId}/progress', [ScheduleVersionController::class, 'progress'])->name('progress');
+        Route::get('versi/{versionId}/progress-data', [ScheduleVersionController::class, 'progressData'])->name('progress-data');
         Route::patch('versi/{scheduleVersion}/finalize', [ScheduleVersionController::class, 'finalize'])->name('versi.finalize');
         Route::delete('versi/{scheduleVersion}', [ScheduleVersionController::class, 'destroy'])->name('versi.destroy');
 
